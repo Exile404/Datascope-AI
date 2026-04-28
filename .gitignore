@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*-env/
+venv/
+.env
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+*.log
+
+# ML artifacts (HUGE files - exclude from git)
+ml/data/processed/*.toon
+ml/data/processed/*.jsonl
+ml/scripts/outputs/
+ml/scripts/models/
+*.gguf
+*.safetensors
+*.bin
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log

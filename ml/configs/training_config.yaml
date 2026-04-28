@@ -1,0 +1,46 @@
+# DataScope AI — Training Configuration
+# Tuned for: RTX 5060 Ti (16GB VRAM) + 10K training examples
+
+dataset:
+  path: "../data/processed/datascope_train.toon"
+  validation_split: 0.1    # 9K train, 1K validation
+  seed: 42
+  shuffle: true
+
+training:
+  num_train_epochs: 3       # bumped from 2 — model needs more passes
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8   # effective batch = 16
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+scheduler:
+  type: "cosine"
+  warmup_ratio: 0.05
+  min_lr_ratio: 0.1
+
+optimizer:
+  type: "adamw_8bit"
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+logging:
+  logging_steps: 10
+  report_to: "none"         # switch to "wandb" for experiment tracking
+
+checkpointing:
+  save_strategy: "epoch"
+  save_total_limit: 2
+  load_best_model_at_end: true
+
+evaluation:
+  eval_strategy: "epoch"
+  eval_steps: null
+  metric_for_best_model: "eval_loss"
+
+memory:
+  fp16: false
+  bf16: true                # RTX 5060 Ti supports bf16
+  gradient_checkpointing: true
+  optim_memory: true
