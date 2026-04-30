@@ -19,7 +19,7 @@ const FEATURES = [
     href: ROUTES.EVALUATOR,
     icon: Brain,
     color: "from-cyan-500 to-blue-500",
-    available: false,
+    available: true,
   },
   {
     title: "Drift Monitor",
@@ -27,7 +27,7 @@ const FEATURES = [
     href: ROUTES.DRIFT,
     icon: Activity,
     color: "from-amber-500 to-orange-500",
-    available: false,
+    available: true,
   },
   {
     title: "Cost Analyzer",
@@ -35,7 +35,7 @@ const FEATURES = [
     href: ROUTES.COST,
     icon: DollarSign,
     color: "from-emerald-500 to-teal-500",
-    available: false,
+    available: true,
   },
 ];
 

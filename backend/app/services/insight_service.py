@@ -3,7 +3,7 @@
 import io
 import pandas as pd
 
-from app.core.llm_engine import LLMEngine
+from app.engines.llm_engine import LLMEngine
 from app.services.profiler_service import profile_dataframe, format_profile_as_prompt
 
 

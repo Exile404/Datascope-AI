@@ -1,4 +1,7 @@
-
+"""
+DataScope AI — Configuration
+Loads settings from environment variables with sensible defaults.
+"""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +36,9 @@ class Settings(BaseSettings):
 
     # ── Profiler ──
     CORRELATION_THRESHOLD: float = 0.3    # only show correlations above this
+
+    # ── Metrics store ──
+    METRICS_DB_PATH: str = "./metrics.db"
 
 
 settings = Settings()

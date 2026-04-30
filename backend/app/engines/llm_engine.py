@@ -35,7 +35,7 @@ class LLMEngine:
                 )
         return True
 
-    async def generate(self, system: str, user: str) -> dict:
+    async def generate(self, system: str, user: str, temperature: float | None = None) -> dict:
         """Single-shot generation using Ollama's /api/chat endpoint."""
         payload = {
             "model": self.model,
@@ -45,7 +45,7 @@ class LLMEngine:
             ],
             "stream": False,
             "options": {
-                "temperature": self.temperature,
+                "temperature": temperature if temperature is not None else self.temperature,
                 "top_p": 0.9,
                 "repeat_penalty": 1.15,
                 "num_predict": 2048,

@@ -5,6 +5,23 @@ export const API_ENDPOINTS = {
   INSIGHT: `${API_URL}/api/profiler/insight`,
   INSIGHT_STREAM: `${API_URL}/api/profiler/insight/stream`,
   HEALTH: `${API_URL}/health`,
+
+  // Cost
+  COST_CALCULATE: `${API_URL}/api/cost/calculate`,
+  COST_PROJECT: `${API_URL}/api/cost/project`,
+  COST_GROWTH: `${API_URL}/api/cost/growth`,
+  COST_USAGE: `${API_URL}/api/cost/usage`,
+  COST_MODELS: `${API_URL}/api/cost/models`,
+
+  // Evaluator
+  EVAL_SINGLE: `${API_URL}/api/evaluator/evaluate`,
+  EVAL_COMPARE: `${API_URL}/api/evaluator/compare`,
+  EVAL_HISTORY: `${API_URL}/api/evaluator/history`,
+
+  // Drift
+  DRIFT_DETECT: `${API_URL}/api/drift/detect`,
+  DRIFT_HALLUCINATIONS: `${API_URL}/api/drift/hallucinations`,
+  DRIFT_HISTORY: (metric: string) => `${API_URL}/api/drift/history/${metric}`,
 } as const;
 
 export const ROUTES = {
