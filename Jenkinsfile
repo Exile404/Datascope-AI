@@ -11,20 +11,17 @@ pipeline {
     agent any
 
     options {
-        timestamps()                          // prefix every log line with a timestamp
-        timeout(time: 30, unit: 'MINUTES')    // kill the build if it hangs
-        buildDiscarder(logRotator(numToKeepStr: '15'))  // keep only the last 15 builds
-        disableConcurrentBuilds()             // no two builds at once (avoids port + volume clashes)
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        disableConcurrentBuilds()
     }
 
     environment {
-        // Image tags carry the build number so each pipeline run is traceable
         BACKEND_SLIM_TAG = "slim-${env.BUILD_NUMBER}"
         BACKEND_FULL_TAG = "full-${env.BUILD_NUMBER}"
         FRONTEND_TAG     = "fe-${env.BUILD_NUMBER}"
         MOCK_TAG         = "mock-${env.BUILD_NUMBER}"
-
-        // Cosmetic prefix that shows up in the Blue Ocean view
         REGISTRY_PREFIX  = "datascope"
     }
 
@@ -116,7 +113,6 @@ pipeline {
         stage('Code Quality (SonarCloud)') {
             steps {
                 script {
-                    // Resolve the SonarScanner tool that Jenkins auto-downloads
                     def scannerHome = tool 'SonarScanner'
 
                     withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
@@ -126,8 +122,7 @@ pipeline {
                                 -Dsonar.host.url=https://sonarcloud.io \\
                                 -Dsonar.token=\$SONAR_TOKEN \\
                                 -Dsonar.projectKey=Exile404_Datascope-AI \\
-                                -Dsonar.organization=exile404 \\
-                                -Dsonar.branch.name=${env.BRANCH_NAME ?: 'feature/jenkins-pipeline'}
+                                -Dsonar.organization=exile404
                         """
                     }
                 }
@@ -143,7 +138,6 @@ pipeline {
             echo "===> Pipeline failed for build #${env.BUILD_NUMBER}"
         }
         always {
-            // Clean up images created during this build (saves disk on the host)
             sh '''
                 docker rmi ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} || true
                 docker rmi ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} || true
