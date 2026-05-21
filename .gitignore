@@ -31,3 +31,25 @@ ml/scripts/models/
 
 # Logs
 *.log
+
+# Test + coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+frontend/coverage/
+
+# Runtime databases (should never be in git)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ML cache (generated during training)
+ml/scripts/unsloth_compiled_cache/
+
+# Docker
+*.pid
+
+# OS extras
+Thumbs.db
