@@ -1,8 +1,9 @@
 // DataScope AI — Jenkins Pipeline
-// Stages: Build, Test (more added incrementally)
+// Stages: Build, Test, Code Quality (Security/Deploy/Release/Monitor added incrementally)
 //
 // Runs on the controller node with Docker socket access.
-// Tools provisioned inside the Jenkins container: docker CLI, compose plugin, python3, node20, pnpm.
+// Tools provisioned inside the Jenkins container: docker CLI, compose plugin,
+// python3, node20, pnpm, plus the auto-installed SonarScanner.
 //
 // Triggered by: GitHub push to feature/jenkins-pipeline (later: webhook).
 
@@ -30,7 +31,6 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Jenkins already cloned via the job's SCM config; this just logs what we got.
                 sh '''
                     echo "===> Working directory: $(pwd)"
                     echo "===> Commit: $(git log -1 --oneline)"
@@ -107,9 +107,29 @@ pipeline {
             }
             post {
                 always {
-                    // Publish results to Jenkins UI even on failure, so we can see what broke
                     junit testResults: 'backend/test-results.xml', allowEmptyResults: false
                     archiveArtifacts artifacts: 'backend/coverage.xml', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Code Quality (SonarCloud)') {
+            steps {
+                script {
+                    // Resolve the SonarScanner tool that Jenkins auto-downloads
+                    def scannerHome = tool 'SonarScanner'
+
+                    withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+                        sh """
+                            echo '===> Running SonarCloud analysis'
+                            ${scannerHome}/bin/sonar-scanner \\
+                                -Dsonar.host.url=https://sonarcloud.io \\
+                                -Dsonar.token=\$SONAR_TOKEN \\
+                                -Dsonar.projectKey=Exile404_Datascope-AI \\
+                                -Dsonar.organization=exile404 \\
+                                -Dsonar.branch.name=${env.BRANCH_NAME ?: 'feature/jenkins-pipeline'}
+                        """
+                    }
                 }
             }
         }
@@ -117,10 +137,10 @@ pipeline {
 
     post {
         success {
-            echo "===> ✅ Pipeline succeeded for build #${env.BUILD_NUMBER}"
+            echo "===> Pipeline succeeded for build #${env.BUILD_NUMBER}"
         }
         failure {
-            echo "===> ❌ Pipeline failed for build #${env.BUILD_NUMBER}"
+            echo "===> Pipeline failed for build #${env.BUILD_NUMBER}"
         }
         always {
             // Clean up images created during this build (saves disk on the host)
