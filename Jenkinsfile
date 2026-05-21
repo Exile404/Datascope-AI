@@ -1,9 +1,5 @@
 // DataScope AI — Jenkins Pipeline
 // Stages: Build, Test, Code Quality, Security (Deploy/Release/Monitor added incrementally)
-//
-// Runs on the controller node with Docker socket access.
-// Tools provisioned inside the Jenkins container: docker CLI, compose plugin,
-// python3, node20, pnpm, SonarScanner, trivy.
 
 pipeline {
     agent any
@@ -21,6 +17,9 @@ pipeline {
         FRONTEND_TAG     = "fe-${env.BUILD_NUMBER}"
         MOCK_TAG         = "mock-${env.BUILD_NUMBER}"
         REGISTRY_PREFIX  = "datascope"
+
+        // Shared Trivy cache across stages (the DB is large, only download once)
+        TRIVY_CACHE_DIR  = "/tmp/trivy-cache"
     }
 
     stages {
@@ -95,8 +94,6 @@ pipeline {
                         --cov=app \
                         --cov-report=xml:coverage.xml \
                         --cov-report=term
-
-                    echo "===> Test results saved to test-results.xml"
                 '''
             }
             post {
@@ -127,16 +124,31 @@ pipeline {
         }
 
         stage('Security') {
-            parallel {
+            // Sub-stages run sequentially. Trivy uses a shared BoltDB cache
+            // that doesn't handle concurrent writers, so parallelising the
+            // two trivy scans caused DB corruption in build #5. npm audit
+            // also serialised here for predictable log order.
+            stages {
+                stage('Trivy: prime DB') {
+                    steps {
+                        sh '''
+                            echo "===> Priming Trivy vulnerability DB (shared by all scans)"
+                            mkdir -p ${TRIVY_CACHE_DIR}
+                            trivy image --download-db-only --cache-dir ${TRIVY_CACHE_DIR}
+                            echo "===> Cache contents:"
+                            ls -la ${TRIVY_CACHE_DIR}
+                        '''
+                    }
+                }
                 stage('Trivy: backend slim') {
                     steps {
                         sh '''
                             echo "===> Trivy scanning ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG}"
-
                             mkdir -p security-reports
 
-                            # Human-readable report (table format)
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -144,8 +156,9 @@ pipeline {
                                 --output security-reports/trivy-backend-slim.txt \
                                 ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} || true
 
-                            # Machine-readable JSON for archiving
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -153,12 +166,13 @@ pipeline {
                                 --output security-reports/trivy-backend-slim.json \
                                 ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} || true
 
-                            # Show the table in the Jenkins log
                             echo "===> Trivy results (HIGH+CRITICAL) for backend slim:"
-                            cat security-reports/trivy-backend-slim.txt
+                            cat security-reports/trivy-backend-slim.txt || echo "(no report file generated)"
 
-                            # Fail the build if any HIGH/CRITICAL CVEs found (exit code 1)
+                            # Enforce: fail build on HIGH or CRITICAL
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -174,6 +188,8 @@ pipeline {
                             mkdir -p security-reports
 
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -182,6 +198,8 @@ pipeline {
                                 ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} || true
 
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -190,9 +208,11 @@ pipeline {
                                 ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} || true
 
                             echo "===> Trivy results (HIGH+CRITICAL) for frontend:"
-                            cat security-reports/trivy-frontend.txt
+                            cat security-reports/trivy-frontend.txt || echo "(no report file generated)"
 
                             trivy image \
+                                --cache-dir ${TRIVY_CACHE_DIR} \
+                                --skip-db-update \
                                 --severity HIGH,CRITICAL \
                                 --ignorefile .trivyignore \
                                 --no-progress \
@@ -201,29 +221,27 @@ pipeline {
                         '''
                     }
                 }
-                stage('npm audit (frontend)') {
+                stage('pnpm audit (frontend)') {
                     steps {
                         sh '''
-                            echo "===> Running pnpm audit on frontend dependencies"
+                            echo "===> Installing frontend deps for audit"
                             mkdir -p security-reports
                             cd frontend
+                            pnpm install --frozen-lockfile --prefer-offline
 
-                            # pnpm audit. --audit-level=high means it returns non-zero
-                            # for high/critical findings. JSON saved for archival.
+                            echo "===> Running pnpm audit"
+                            # First run: capture machine-readable output, never fails
                             pnpm audit --audit-level=high --json \
-                                > ../security-reports/pnpm-audit.json || \
-                                AUDIT_FAILED=true
+                                > ../security-reports/pnpm-audit.json 2>&1 || true
 
-                            # Human-readable version
+                            # Second run: capture human-readable output, never fails
                             pnpm audit --audit-level=high \
-                                | tee ../security-reports/pnpm-audit.txt || true
+                                > ../security-reports/pnpm-audit.txt 2>&1 || true
 
-                            cd ..
                             echo "===> pnpm audit output:"
-                            cat security-reports/pnpm-audit.txt
+                            cat ../security-reports/pnpm-audit.txt
 
-                            # Re-run to set the actual exit code (pipe above swallowed it)
-                            cd frontend
+                            # Third run: enforce. This one fails the build on high/critical.
                             pnpm audit --audit-level=high
                         '''
                     }
