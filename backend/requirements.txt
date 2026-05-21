@@ -9,6 +9,7 @@ attrs==26.1.0
 certifi==2026.4.22
 charset-normalizer==3.4.7
 click==8.3.3
+coverage==7.14.0
 cuda-bindings==13.2.0
 cuda-pathfinder==1.5.4
 cuda-toolkit==13.0.2
@@ -26,6 +27,7 @@ httpx==0.28.1
 httpx-sse==0.4.3
 huggingface_hub==1.12.2
 idna==3.13
+iniconfig==2.3.0
 Jinja2==3.1.6
 joblib==1.5.3
 jsonpatch==1.33
@@ -71,11 +73,15 @@ orjson==3.11.8
 ormsgpack==1.12.2
 packaging==26.2
 pandas==3.0.2
+pluggy==1.6.0
 propcache==0.4.1
 pydantic==2.13.3
 pydantic-settings==2.14.0
 pydantic_core==2.46.3
 Pygments==2.20.0
+pytest==8.3.4
+pytest-asyncio==0.25.2
+pytest-cov==6.0.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.26
