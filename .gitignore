@@ -53,3 +53,6 @@ ml/scripts/unsloth_compiled_cache/
 
 # OS extras
 Thumbs.db
+
+# Screenshots dropped at the root (move to screenshots/ instead)
+/Screenshot*.png
