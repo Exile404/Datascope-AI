@@ -1,0 +1,107 @@
+# DataScope AI — Staging environment
+#
+# Stack:
+#   - backend (slim CPU image, port 8001)
+#   - frontend (Next.js standalone, port 3001)
+#   - ollama-mock (fake LLM, port 11435)
+#
+# Used by: Jenkins Deploy stage, local pre-prod testing
+# Run:    docker compose -f docker-compose.staging.yml up -d
+# Stop:   docker compose -f docker-compose.staging.yml down
+# Logs:   docker compose -f docker-compose.staging.yml logs -f
+
+name: datascope-staging
+
+services:
+  # ---------- Ollama Mock ----------
+  ollama-mock:
+    image: datascope-ollama-mock:${MOCK_TAG:-dev}
+    build:
+      context: ./backend/mock-ollama
+      dockerfile: Dockerfile
+    container_name: datascope-ollama-mock-staging
+    ports:
+      - "11435:11434"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - datascope-staging-net
+    restart: unless-stopped
+
+  # ---------- Backend (FastAPI) ----------
+  backend:
+    image: datascope-backend:${BACKEND_TAG:-slim-dev}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.slim
+    container_name: datascope-backend-staging
+    ports:
+      - "8001:8000"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 8000
+      DEBUG: "false"
+      # Point at the mock service via docker DNS (service name = hostname)
+      OLLAMA_BASE_URL: "http://ollama-mock:11434"
+      OLLAMA_MODEL: "datascope-analyst"
+      LLM_TIMEOUT: 30
+      # Frontend will be reached at host:3001; allow it through CORS
+      CORS_ORIGINS: '["http://localhost:3001","http://127.0.0.1:3001"]'
+      # Writable path inside the container
+      METRICS_DB_PATH: "/data/metrics.db"
+    volumes:
+      - backend-data-staging:/data
+    depends_on:
+      ollama-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - datascope-staging-net
+    restart: unless-stopped
+
+  # ---------- Frontend (Next.js) ----------
+  frontend:
+    image: datascope-frontend:${FRONTEND_TAG:-dev}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Bakes into the bundle: browser talks to backend via host port 8001
+        NEXT_PUBLIC_API_URL: "http://localhost:8001"
+    container_name: datascope-frontend-staging
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: "production"
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - datascope-staging-net
+    restart: unless-stopped
+
+networks:
+  datascope-staging-net:
+    name: datascope-staging-net
+    driver: bridge
+
+volumes:
+  backend-data-staging:
+    name: datascope-backend-data-staging
