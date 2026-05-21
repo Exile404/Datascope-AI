@@ -14,7 +14,6 @@ pipeline {
         timeout(time: 30, unit: 'MINUTES')    // kill the build if it hangs
         buildDiscarder(logRotator(numToKeepStr: '15'))  // keep only the last 15 builds
         disableConcurrentBuilds()             // no two builds at once (avoids port + volume clashes)
-        ansiColor('xterm')                    // colourise log output where supported
     }
 
     environment {
