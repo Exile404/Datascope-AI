@@ -14,7 +14,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Build deps for any wheels that need compilation (numpy, scipy, etc).
 # These get thrown away in stage 2.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,7 +46,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_HOME=/app
 
 # Runtime-only system deps. libgomp1 is needed by scikit-learn / torch.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
