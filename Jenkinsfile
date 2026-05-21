@@ -1,11 +1,9 @@
 // DataScope AI — Jenkins Pipeline
-// Stages: Build, Test, Code Quality (Security/Deploy/Release/Monitor added incrementally)
+// Stages: Build, Test, Code Quality, Security (Deploy/Release/Monitor added incrementally)
 //
 // Runs on the controller node with Docker socket access.
 // Tools provisioned inside the Jenkins container: docker CLI, compose plugin,
-// python3, node20, pnpm, plus the auto-installed SonarScanner.
-//
-// Triggered by: GitHub push to feature/jenkins-pipeline (later: webhook).
+// python3, node20, pnpm, SonarScanner, trivy.
 
 pipeline {
     agent any
@@ -47,7 +45,6 @@ pipeline {
                                 -f backend/Dockerfile.slim \
                                 -t ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} \
                                 backend/
-                            echo "===> Image size:"
                             docker images ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} --format "{{.Size}}"
                         '''
                     }
@@ -125,6 +122,118 @@ pipeline {
                                 -Dsonar.organization=exile404
                         """
                     }
+                }
+            }
+        }
+
+        stage('Security') {
+            parallel {
+                stage('Trivy: backend slim') {
+                    steps {
+                        sh '''
+                            echo "===> Trivy scanning ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG}"
+
+                            mkdir -p security-reports
+
+                            # Human-readable report (table format)
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --format table \
+                                --output security-reports/trivy-backend-slim.txt \
+                                ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} || true
+
+                            # Machine-readable JSON for archiving
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --format json \
+                                --output security-reports/trivy-backend-slim.json \
+                                ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} || true
+
+                            # Show the table in the Jenkins log
+                            echo "===> Trivy results (HIGH+CRITICAL) for backend slim:"
+                            cat security-reports/trivy-backend-slim.txt
+
+                            # Fail the build if any HIGH/CRITICAL CVEs found (exit code 1)
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --exit-code 1 \
+                                ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG}
+                        '''
+                    }
+                }
+                stage('Trivy: frontend') {
+                    steps {
+                        sh '''
+                            echo "===> Trivy scanning ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG}"
+                            mkdir -p security-reports
+
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --format table \
+                                --output security-reports/trivy-frontend.txt \
+                                ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} || true
+
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --format json \
+                                --output security-reports/trivy-frontend.json \
+                                ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} || true
+
+                            echo "===> Trivy results (HIGH+CRITICAL) for frontend:"
+                            cat security-reports/trivy-frontend.txt
+
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignorefile .trivyignore \
+                                --no-progress \
+                                --exit-code 1 \
+                                ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG}
+                        '''
+                    }
+                }
+                stage('npm audit (frontend)') {
+                    steps {
+                        sh '''
+                            echo "===> Running pnpm audit on frontend dependencies"
+                            mkdir -p security-reports
+                            cd frontend
+
+                            # pnpm audit. --audit-level=high means it returns non-zero
+                            # for high/critical findings. JSON saved for archival.
+                            pnpm audit --audit-level=high --json \
+                                > ../security-reports/pnpm-audit.json || \
+                                AUDIT_FAILED=true
+
+                            # Human-readable version
+                            pnpm audit --audit-level=high \
+                                | tee ../security-reports/pnpm-audit.txt || true
+
+                            cd ..
+                            echo "===> pnpm audit output:"
+                            cat security-reports/pnpm-audit.txt
+
+                            # Re-run to set the actual exit code (pipe above swallowed it)
+                            cd frontend
+                            pnpm audit --audit-level=high
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'security-reports/**',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
                 }
             }
         }

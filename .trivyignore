@@ -1,0 +1,10 @@
+# DataScope AI — Trivy ignore list
+#
+# Add CVEs we have knowingly accepted, one per line, with a comment.
+# Format: CVE-YYYY-NNNNN  # reason + date reviewed
+#
+# Example:
+# CVE-2023-12345  # No fix available; transitive dep; risk accepted 2025-11. Re-review 2026-05.
+#
+# IMPORTANT: every entry should have an expiry/review date so this file
+# doesn't quietly accumulate stale exceptions.
