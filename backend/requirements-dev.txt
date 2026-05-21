@@ -1,0 +1,9 @@
+# Development + CI test dependencies.
+# Extends slim runtime with pytest tooling.
+# Install in local dev or in Jenkins test stage.
+
+-r requirements-slim.txt
+
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-asyncio==0.25.2
