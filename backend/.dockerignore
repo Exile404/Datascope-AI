@@ -33,6 +33,3 @@ tests/
 README.md
 *.md
 
-# Don't pull alt requirements files into wrong stage
-requirements.txt
-requirements-dev.txt
