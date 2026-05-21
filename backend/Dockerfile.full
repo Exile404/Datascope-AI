@@ -56,6 +56,10 @@ WORKDIR ${APP_HOME}
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=datascope:datascope app/ ./app/
+# Pre-create writable data directory for volume mounts
+RUN mkdir -p /data && chown datascope:datascope /data
+VOLUME ["/data"]
+
 
 USER datascope
 
