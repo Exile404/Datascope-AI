@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1.7
+# DataScope AI Backend — Slim image (CPU-only)
+# Used by: CI test stage, staging deployment
+# Image size target: ~1.5 GB
+
+# ---------- Stage 1: Builder ----------
+# Installs build tools and compiles wheels into a virtualenv we can copy.
+FROM python:3.12-slim-bookworm AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Build deps for any wheels that need compilation (numpy, scipy, etc).
+# These get thrown away in stage 2.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Isolated virtualenv so we can copy it whole into stage 2
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install pip-tools chain first, separately, so it caches across rebuilds
+RUN pip install --upgrade pip setuptools wheel
+
+# Copy only the requirements file first (cache layer: only invalidates when
+# requirements-slim.txt changes, not on every code edit)
+COPY requirements-slim.txt /tmp/requirements-slim.txt
+
+# Install torch from the CPU index, everything else from PyPI.
+# The --index-url for torch keeps us off the 900MB CUDA wheel.
+RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.11.0 \
+    && pip install -r /tmp/requirements-slim.txt
+
+# ---------- Stage 2: Runtime ----------
+# Slim image with only the virtualenv copied across.
+FROM python:3.12-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    APP_HOME=/app
+
+# Runtime-only system deps. libgomp1 is needed by scikit-learn / torch.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user (security best practice, and required for many Kubernetes setups)
+RUN useradd --create-home --shell /bin/bash --uid 1000 datascope
+
+WORKDIR ${APP_HOME}
+
+# Copy the prebuilt venv from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy app code
+COPY --chown=datascope:datascope app/ ./app/
+
+USER datascope
+
+EXPOSE 8000
+
+# Healthcheck calls the /health endpoint we already defined in main.py
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
