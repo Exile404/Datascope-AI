@@ -311,7 +311,7 @@ pipeline {
                     steps {
                         sh '''
                             echo "===> Smoke test 1/3: backend /health"
-                            HEALTH=$(curl -sf http://localhost:8001/health)
+                            HEALTH=$(curl -sf http://host.docker.internal:8001/health)
                             echo "Response: $HEALTH"
                             echo "$HEALTH" | grep -q '"api":"ok"' || {
                                 echo "FAIL: /health did not report api:ok"
@@ -325,7 +325,7 @@ pipeline {
                             echo ""
 
                             echo "===> Smoke test 2/3: backend happy path (POST /api/cost/calculate)"
-                            RESPONSE=$(curl -sf -X POST http://localhost:8001/api/cost/calculate \\
+                            RESPONSE=$(curl -sf -X POST http://host.docker.internal:8001/api/cost/calculate \\
                                 -H "Content-Type: application/json" \\
                                 -d '{"model":"gpt-4o","input_tokens":1000000,"output_tokens":500000}')
                             echo "Response: $RESPONSE"
@@ -340,7 +340,7 @@ pipeline {
                             echo ""
 
                             echo "===> Smoke test 3/3: frontend homepage (GET /)"
-                            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/)
+                            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:3001/)
                             echo "HTTP code: $HTTP_CODE"
                             [ "$HTTP_CODE" = "200" ] || {
                                 echo "FAIL: frontend did not return 200 (got $HTTP_CODE)"
