@@ -63,6 +63,15 @@ RUN addgroup --system --gid 1001 nodejs && \
 
 WORKDIR /app
 
+# Remove bundled npm/npx/corepack (they ship with node:22-alpine but are
+# unused by the standalone Next.js server). Eliminates HIGH CVEs in npm's
+# bundled deps (e.g. picomatch via tinyglobby) and shrinks the image.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/corepack
+
 # Standalone bundle: trimmed runtime with only used packages
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
