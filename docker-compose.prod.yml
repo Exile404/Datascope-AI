@@ -41,6 +41,7 @@ services:
       # Frontend lives at host:3000; CORS must allow it
       CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
       METRICS_DB_PATH: "/data/metrics.db"
+      ENABLE_METRICS: "true"
     volumes:
       - backend-data-prod:/data
     # host.docker.internal isn't automatically defined on Linux,

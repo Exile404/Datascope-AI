@@ -116,3 +116,5 @@ rich==15.0.0
 shellingham==1.5.4
 typer==0.25.0
 setuptools==81.0.0
+
+prometheus-client==0.21.1

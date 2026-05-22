@@ -53,6 +53,7 @@ services:
       CORS_ORIGINS: '["http://localhost:3001","http://127.0.0.1:3001"]'
       # Writable path inside the container
       METRICS_DB_PATH: "/data/metrics.db"
+      ENABLE_METRICS: "true"
     volumes:
       - backend-data-staging:/data
     depends_on:
