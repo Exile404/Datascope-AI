@@ -255,6 +255,69 @@ pipeline {
                 }
             }
         }
+        stage('Deploy (staging)') {
+            stages {
+                stage('Stage: Up + Wait Healthy') {
+                    steps {
+                        sh '''
+                            echo "===> Bringing up staging stack with images tagged for this build"
+
+                            # Tear down any leftover staging stack from previous builds.
+                            # Force volume removal so the metrics.db doesn't carry permission state.
+                            docker compose -f docker-compose.staging.yml down -v --remove-orphans 2>/dev/null || true
+
+                            # Boot the stack. BACKEND_TAG/FRONTEND_TAG/MOCK_TAG come from
+                            # the top-level environment block, so compose uses *this* build's images.
+                            export BACKEND_TAG=${BACKEND_SLIM_TAG}
+                            export FRONTEND_TAG=${FRONTEND_TAG}
+                            export MOCK_TAG=${MOCK_TAG}
+
+                            docker compose -f docker-compose.staging.yml up -d
+
+                            echo ""
+                            echo "===> Waiting for services to report healthy (max 90s)"
+
+                            # Poll docker compose ps until all services show (healthy),
+                            # or 18 attempts (90 seconds) have elapsed.
+                            for i in $(seq 1 18); do
+                                STATUS=$(docker compose -f docker-compose.staging.yml ps --format "{{.Name}}|{{.Health}}")
+                                echo "Attempt $i:"
+                                echo "$STATUS"
+
+                                UNHEALTHY=$(echo "$STATUS" | grep -v "healthy" || true)
+                                if [ -z "$UNHEALTHY" ]; then
+                                    echo ""
+                                    echo "===> All services healthy"
+                                    break
+                                fi
+
+                                if [ $i -eq 18 ]; then
+                                    echo ""
+                                    echo "===> TIMEOUT: not all services healthy after 90s"
+                                    docker compose -f docker-compose.staging.yml logs --tail=50
+                                    exit 1
+                                fi
+
+                                sleep 5
+                            done
+
+                            echo ""
+                            echo "===> Final stack status:"
+                            docker compose -f docker-compose.staging.yml ps
+                        '''
+                    }
+                }
+            }
+            post {
+                failure {
+                    sh '''
+                        echo "===> Deploy stage failed, tearing down staging stack"
+                        docker compose -f docker-compose.staging.yml logs --tail=100 || true
+                        docker compose -f docker-compose.staging.yml down -v --remove-orphans || true
+                    '''
+                }
+            }
+        }
     }
 
     post {
