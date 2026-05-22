@@ -457,6 +457,202 @@ pipeline {
                 }
             }
         }
+        stage('Release (production)') {
+            when {
+                tag pattern: "v*", comparator: "GLOB"
+            }
+            environment {
+                // Capture the tag name for use as the version label.
+                // env.TAG_NAME is auto-set by Jenkins on tag builds.
+                VERSION_TAG = "${env.TAG_NAME}"
+            }
+            stages {
+                stage('Snapshot Previous Production') {
+                    steps {
+                        sh '''
+                            echo "===> Snapshotting current :production images as :production-rollback"
+                            echo "===> (so we can restore them if this release fails smoke tests)"
+                            echo ""
+
+                            for svc in backend frontend ollama-mock; do
+                                # If a :production tag exists, snapshot it. If not, this is the
+                                # first ever release, so skip with a note.
+                                if docker image inspect "${REGISTRY_PREFIX}-${svc}:production" >/dev/null 2>&1; then
+                                    docker tag "${REGISTRY_PREFIX}-${svc}:production" \\
+                                               "${REGISTRY_PREFIX}-${svc}:production-rollback"
+                                    echo "Snapshotted: ${REGISTRY_PREFIX}-${svc}:production -> :production-rollback"
+                                else
+                                    echo "No existing :production tag for ${svc}, skipping snapshot."
+                                    echo "(First release ever, no rollback target until next time.)"
+                                fi
+                            done
+                        '''
+                    }
+                }
+
+                stage('Promote :staging to :production') {
+                    steps {
+                        sh '''
+                            echo "===> Promoting :staging images to :production and :${VERSION_TAG}"
+                            echo ""
+
+                            for svc in backend frontend ollama-mock; do
+                                # Verify :staging exists first (sanity check; if Deploy stage ran,
+                                # :staging should always exist by this point).
+                                if ! docker image inspect "${REGISTRY_PREFIX}-${svc}:staging" >/dev/null 2>&1; then
+                                    echo "ERROR: ${REGISTRY_PREFIX}-${svc}:staging not found."
+                                    echo "Did the Deploy stage tag this image? Aborting release."
+                                    exit 1
+                                fi
+
+                                docker tag "${REGISTRY_PREFIX}-${svc}:staging" \\
+                                           "${REGISTRY_PREFIX}-${svc}:production"
+                                docker tag "${REGISTRY_PREFIX}-${svc}:staging" \\
+                                           "${REGISTRY_PREFIX}-${svc}:${VERSION_TAG}"
+                                echo "Promoted: ${REGISTRY_PREFIX}-${svc}:staging"
+                                echo "       -> :production"
+                                echo "       -> :${VERSION_TAG}"
+                            done
+
+                            echo ""
+                            echo "===> Tag summary:"
+                            docker images --format "{{.Repository}}:{{.Tag}}" \\
+                                | grep -E "(${VERSION_TAG}|production|production-rollback)\\$" \\
+                                | sort
+                        '''
+                    }
+                }
+
+                stage('Bring Up Production') {
+                    steps {
+                        sh '''
+                            echo "===> Bringing up production stack via docker-compose.prod.yml"
+                            echo ""
+
+                            # Tear down any leftover prod stack (e.g. from a previous failed release).
+                            docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+
+                            # Compose reads BACKEND_TAG / FRONTEND_TAG via env vars in the YAML.
+                            # We set them to 'production' so prod runs the just-promoted images.
+                            export BACKEND_TAG=production
+                            export FRONTEND_TAG=production
+
+                            docker compose -f docker-compose.prod.yml up -d
+
+                            echo ""
+                            echo "===> Waiting for production services to report healthy (max 90s)"
+
+                            for i in $(seq 1 18); do
+                                STATUS=$(docker compose -f docker-compose.prod.yml ps --format "{{.Name}}|{{.Health}}")
+                                echo "Attempt $i:"
+                                echo "$STATUS"
+
+                                BAD=$(echo "$STATUS" | grep -E "unhealthy|starting|Exited|Restarting" || true)
+                                if [ -z "$BAD" ]; then
+                                    echo ""
+                                    echo "===> Production stack healthy"
+                                    break
+                                fi
+
+                                if [ $i -eq 18 ]; then
+                                    echo ""
+                                    echo "===> TIMEOUT: production not healthy after 90s"
+                                    docker compose -f docker-compose.prod.yml logs --tail=80
+                                    exit 1
+                                fi
+
+                                sleep 5
+                            done
+
+                            echo ""
+                            echo "===> Final production stack status:"
+                            docker compose -f docker-compose.prod.yml ps
+                        '''
+                    }
+                }
+
+                stage('Smoke Test Production') {
+                    steps {
+                        sh '''
+                            echo "===> Running 3 smoke tests against production"
+                            echo ""
+
+                            echo "===> 1/3 backend /health"
+                            HEALTH=$(curl -sf http://host.docker.internal:8000/health)
+                            echo "Response: $HEALTH"
+                            echo "$HEALTH" | grep -q '"api":"ok"' || { echo "FAIL: /health api not ok"; exit 1; }
+                            echo "PASS"
+                            echo ""
+
+                            echo "===> 2/3 backend happy path"
+                            RESPONSE=$(curl -sf -X POST http://host.docker.internal:8000/api/cost/calculate \\
+                                -H "Content-Type: application/json" \\
+                                -d '{"model":"gpt-4o","input_tokens":1000000,"output_tokens":500000}')
+                            echo "Response: $RESPONSE"
+                            echo "$RESPONSE" | grep -q '"total_cost":7.5' || { echo "FAIL: total_cost != 7.5"; exit 1; }
+                            echo "PASS"
+                            echo ""
+
+                            echo "===> 3/3 frontend homepage"
+                            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:3000/)
+                            echo "HTTP code: $HTTP_CODE"
+                            [ "$HTTP_CODE" = "200" ] || { echo "FAIL: frontend not 200"; exit 1; }
+                            echo "PASS"
+                            echo ""
+
+                            echo "===> Production release ${VERSION_TAG} VALIDATED"
+                            echo "===> Production stack remains running."
+                            echo "===> :production-rollback tag preserves the previous version."
+                        '''
+                    }
+                }
+            }
+            post {
+                failure {
+                    sh '''
+                        echo "===> RELEASE FAILED: rolling back to previous :production"
+                        echo "===> (i.e. the snapshot taken at start of this release)"
+                        echo ""
+
+                        echo "===> Step 1: tear down the failed new prod stack"
+                        docker compose -f docker-compose.prod.yml logs --tail=100 || true
+                        docker compose -f docker-compose.prod.yml down --remove-orphans || true
+
+                        echo ""
+                        echo "===> Step 2: restore :production-rollback to :production"
+                        ROLLED_BACK=0
+                        for svc in backend frontend ollama-mock; do
+                            if docker image inspect "${REGISTRY_PREFIX}-${svc}:production-rollback" >/dev/null 2>&1; then
+                                docker tag "${REGISTRY_PREFIX}-${svc}:production-rollback" \\
+                                           "${REGISTRY_PREFIX}-${svc}:production"
+                                echo "Restored: ${REGISTRY_PREFIX}-${svc}:production-rollback -> :production"
+                                ROLLED_BACK=1
+                            else
+                                echo "No :production-rollback for ${svc}, nothing to restore."
+                            fi
+                        done
+
+                        if [ "$ROLLED_BACK" = "1" ]; then
+                            echo ""
+                            echo "===> Step 3: bring up rolled-back production stack"
+                            export BACKEND_TAG=production
+                            export FRONTEND_TAG=production
+                            docker compose -f docker-compose.prod.yml up -d
+                            sleep 15
+                            echo ""
+                            echo "===> Step 4: verify rolled-back stack:"
+                            docker compose -f docker-compose.prod.yml ps
+                            echo ""
+                            echo "===> ROLLBACK COMPLETE. Build marked failed; prod is on previous version."
+                        else
+                            echo ""
+                            echo "===> No rollback target existed (this was the first release ever)."
+                            echo "===> Prod is now empty. Build marked failed."
+                        fi
+                    '''
+                }
+            }
+        }
     }
 
     post {
