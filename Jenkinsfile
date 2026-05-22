@@ -284,8 +284,8 @@ pipeline {
                                 echo "Attempt $i:"
                                 echo "$STATUS"
 
-                                UNHEALTHY=$(echo "$STATUS" | grep -v "healthy" || true)
-                                if [ -z "$UNHEALTHY" ]; then
+                                BAD=$(echo "$STATUS" | grep -E "unhealthy|starting|Exited|Restarting" || true)
+                                if [ -z "$BAD" ]; then
                                     echo ""
                                     echo "===> All services healthy"
                                     break
