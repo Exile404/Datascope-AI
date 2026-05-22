@@ -353,6 +353,26 @@ pipeline {
                         '''
                     }
                 }
+                stage('Tag :staging') {
+                    steps {
+                        sh '''
+                            echo "===> Tagging validated images as :staging"
+
+                            docker tag ${REGISTRY_PREFIX}-backend:${BACKEND_SLIM_TAG} \\
+                                       ${REGISTRY_PREFIX}-backend:staging
+                            docker tag ${REGISTRY_PREFIX}-frontend:${FRONTEND_TAG} \\
+                                       ${REGISTRY_PREFIX}-frontend:staging
+                            docker tag ${REGISTRY_PREFIX}-ollama-mock:${MOCK_TAG} \\
+                                       ${REGISTRY_PREFIX}-ollama-mock:staging
+
+                            echo ""
+                            echo "===> :staging tags now point to:"
+                            docker images --format "{{.Repository}}:{{.Tag}} -> {{.ID}}" \\
+                                | grep -E ":(staging|${BACKEND_SLIM_TAG}|${FRONTEND_TAG}|${MOCK_TAG})\\$" \\
+                                | sort
+                        '''
+                    }
+                }
             }
             post {
                 failure {
