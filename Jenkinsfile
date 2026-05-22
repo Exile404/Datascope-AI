@@ -373,6 +373,52 @@ pipeline {
                         '''
                     }
                 }
+                stage('Rollback Verification') {
+                    steps {
+                        sh '''
+                            echo "===> Rollback drill: simulate a backend failure"
+                            echo "===> after a successful deploy and verify our health"
+                            echo "===> probe correctly detects the degraded state."
+                            echo ""
+
+                            echo "===> Step 1: confirm backend is currently healthy"
+                            INITIAL=$(curl -sf http://host.docker.internal:8001/health || echo "FAILED_AT_START")
+                            echo "Pre-kill probe: $INITIAL"
+                            if [ "$INITIAL" = "FAILED_AT_START" ]; then
+                                echo "ERROR: backend was not healthy before the drill even started."
+                                echo "Something is wrong with the stack. Aborting."
+                                exit 1
+                            fi
+                            echo ""
+
+                            echo "===> Step 2: kill the backend container"
+                            docker kill datascope-backend-staging
+                            echo "Backend killed."
+                            echo ""
+
+                            echo "===> Step 3: wait briefly for Docker to register the death"
+                            sleep 5
+                            echo "Container state:"
+                            docker compose -f docker-compose.staging.yml ps backend
+                            echo ""
+
+                            echo "===> Step 4: probe health; we EXPECT this to fail"
+                            POST_KILL=$(curl -sf -m 5 http://host.docker.internal:8001/health 2>&1 || echo "PROBE_FAILED_AS_EXPECTED")
+                            echo "Post-kill probe: $POST_KILL"
+                            echo ""
+
+                            if echo "$POST_KILL" | grep -q "PROBE_FAILED_AS_EXPECTED"; then
+                                echo "===> PASS: health probe correctly detected the failure"
+                                echo "===> In a real deploy this would trigger rollback to the"
+                                echo "===> previously-validated :staging image."
+                            else
+                                echo "===> FAIL: backend responded despite being killed."
+                                echo "===> Our health probe cannot be trusted to gate deployments."
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
             }
             post {
                 failure {
