@@ -10,6 +10,13 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '15'))
         disableConcurrentBuilds()
     }
+    parameters {
+        string(
+            name: 'RELEASE_TAG',
+            defaultValue: '',
+            description: 'Set to a version like "v1.0.0" to manually trigger a production release. Leave empty for normal CI runs. (Auto-set via TAG_NAME if pipeline is triggered by a git tag push.)'
+        )
+    }
 
     environment {
         BACKEND_SLIM_TAG = "slim-${env.BUILD_NUMBER}"
@@ -459,12 +466,18 @@ pipeline {
         }
         stage('Release (production)') {
             when {
-                tag pattern: "v*", comparator: "GLOB"
+                anyOf {
+                    tag pattern: "v*", comparator: "GLOB"
+                    expression {
+                        return params.RELEASE_TAG?.trim() ? params.RELEASE_TAG.startsWith('v') : false
+                    }
+                }
             }
             environment {
-                // Capture the tag name for use as the version label.
-                // env.TAG_NAME is auto-set by Jenkins on tag builds.
-                VERSION_TAG = "${env.TAG_NAME}"
+                // VERSION_TAG resolves in priority: param > env tag > error.
+                // params.RELEASE_TAG is set when triggered manually with the parameter.
+                // env.TAG_NAME is set automatically by Jenkins when triggered by a tag push.
+                VERSION_TAG = "${params.RELEASE_TAG?.trim() ?: env.TAG_NAME ?: 'unknown'}"
             }
             stages {
                 stage('Snapshot Previous Production') {
