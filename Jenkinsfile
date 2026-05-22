@@ -307,6 +307,52 @@ pipeline {
                         '''
                     }
                 }
+                stage('Smoke Tests') {
+                    steps {
+                        sh '''
+                            echo "===> Smoke test 1/3: backend /health"
+                            HEALTH=$(curl -sf http://localhost:8001/health)
+                            echo "Response: $HEALTH"
+                            echo "$HEALTH" | grep -q '"api":"ok"' || {
+                                echo "FAIL: /health did not report api:ok"
+                                exit 1
+                            }
+                            echo "$HEALTH" | grep -q '"llm":"ok"' || {
+                                echo "FAIL: /health did not report llm:ok"
+                                exit 1
+                            }
+                            echo "PASS: backend health OK"
+                            echo ""
+
+                            echo "===> Smoke test 2/3: backend happy path (POST /api/cost/calculate)"
+                            RESPONSE=$(curl -sf -X POST http://localhost:8001/api/cost/calculate \\
+                                -H "Content-Type: application/json" \\
+                                -d '{"model":"gpt-4o","input_tokens":1000000,"output_tokens":500000}')
+                            echo "Response: $RESPONSE"
+
+                            # Assert: total_cost == 7.5
+                            echo "$RESPONSE" | grep -q '"total_cost":7.5' || {
+                                echo "FAIL: total_cost was not 7.5"
+                                echo "Expected: gpt-4o @ 1M input ($2.50) + 500k output ($5.00) = $7.50"
+                                exit 1
+                            }
+                            echo "PASS: cost calculation returned expected value"
+                            echo ""
+
+                            echo "===> Smoke test 3/3: frontend homepage (GET /)"
+                            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/)
+                            echo "HTTP code: $HTTP_CODE"
+                            [ "$HTTP_CODE" = "200" ] || {
+                                echo "FAIL: frontend did not return 200 (got $HTTP_CODE)"
+                                exit 1
+                            }
+                            echo "PASS: frontend homepage OK"
+                            echo ""
+
+                            echo "===> All 3 smoke tests passed"
+                        '''
+                    }
+                }
             }
             post {
                 failure {
