@@ -419,6 +419,33 @@ pipeline {
                         '''
                     }
                 }
+                stage('Final Teardown') {
+                    steps {
+                        sh '''
+                            echo "===> Tearing down staging stack"
+                            echo "===> (Image :staging tags persist, so a known-good"
+                            echo "===> reference deploy can be re-launched any time.)"
+                            echo ""
+
+                            docker compose -f docker-compose.staging.yml down -v --remove-orphans
+
+                            echo ""
+                            echo "===> Verifying clean state"
+                            REMAINING=$(docker ps -a --filter "name=datascope-.*-staging" --format "{{.Names}}")
+                            if [ -n "$REMAINING" ]; then
+                                echo "WARNING: leftover staging containers detected:"
+                                echo "$REMAINING"
+                            else
+                                echo "PASS: no leftover staging containers"
+                            fi
+
+                            echo ""
+                            echo "===> :staging-tagged images still available:"
+                            docker images --filter "reference=*:staging" \\
+                                --format "{{.Repository}}:{{.Tag}} ({{.Size}})" || true
+                        '''
+                    }
+                }
             }
             post {
                 failure {
