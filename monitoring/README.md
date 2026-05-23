@@ -53,7 +53,7 @@ The community library `prometheus-fastapi-instrumentator` was the obvious choice
 
 Two Grafana dashboards are provisioned from `monitoring/grafana/dashboards/`:
 
-- **DataScope AI: Application Metrics** (`/d/datascope-app`): RPS by status, latency percentiles (p50/p95/p99), in-flight requests, error rate, total requests, backend up/down indicator, top routes by RPS.
+- **DataScope AI: Application Metrics** (`/d/datascope-app` (port 3002)): RPS by status, latency percentiles (p50/p95/p99), in-flight requests, error rate, total requests, backend up/down indicator, top routes by RPS.
 - **DataScope AI: Infrastructure Metrics** (`/d/datascope-infra`): host CPU/RAM/disk usage gauges, load average, network I/O, memory breakdown, disk I/O.
 
 Both dashboards are loaded automatically at Grafana boot via `monitoring/grafana/provisioning/dashboards/dashboards.yml`. The Prometheus datasource is also auto-provisioned (`monitoring/grafana/provisioning/datasources/prometheus.yml`) so the stack is fully reproducible: a fresh `docker compose up` brings everything online with no manual UI clicks.
