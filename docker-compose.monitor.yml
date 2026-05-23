@@ -82,12 +82,21 @@ services:
     restart: unless-stopped
     ports:
       - "9093:9093"
+    env_file:
+      - .env.monitor
     volumes:
-      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/alertmanager/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
       - alertmanager-data:/alertmanager
-    command:
-      - "--config.file=/etc/alertmanager/alertmanager.yml"
-      - "--storage.path=/alertmanager"
+    # Alertmanager YAML does not interpolate env vars natively. We render the
+    # template at start with a tiny sh wrapper that substitutes $VARS using sed,
+    # then exec the real binary. Keeps secrets out of the image and out of git.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        sed -e "s|\$$SMTP_FROM|$$SMTP_FROM|g"             -e "s|\$$SMTP_TO|$$SMTP_TO|g"             -e "s|\$$SMTP_USER|$$SMTP_USER|g"             -e "s|\$$SMTP_PASSWORD|$$SMTP_PASSWORD|g"             /etc/alertmanager/alertmanager.yml.tmpl > /tmp/alertmanager.yml
+        exec /bin/alertmanager             --config.file=/tmp/alertmanager.yml             --storage.path=/alertmanager             --cluster.listen-address=
     networks:
       - monitor-net
 

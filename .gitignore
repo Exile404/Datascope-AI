@@ -56,3 +56,4 @@ Thumbs.db
 
 # Screenshots dropped at the root (move to screenshots/ instead)
 /Screenshot*.png
+.env.monitor
