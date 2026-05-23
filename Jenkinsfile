@@ -707,7 +707,10 @@ pipeline {
                         }
                     }
 
-                    // 2. Prometheus scrape targets all 'up'
+                    // 2. Prometheus scrape targets all 'up'.
+                    // Wait one scrape interval (15s) plus margin so a freshly-
+                    // released backend has been observed at least once.
+                    sleep time: 20, unit: 'SECONDS'
                     def targetsRc = sh(returnStatus: true, script: """
                         set -eu
                         curl -fsS --max-time 5 http://host.docker.internal:9091/api/v1/targets > /tmp/targets.json
