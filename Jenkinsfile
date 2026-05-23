@@ -666,8 +666,101 @@ pipeline {
                 }
             }
         }
-    }
 
+        // ----------------------------------------------------------------
+        // Monitor: verify the observability stack is healthy AFTER release,
+        // and annotate Grafana with the deploy event so dashboards show a
+        // marker at the moment this build went live in production.
+        //
+        // Skipped for non-prod-promotion builds (no point annotating prod
+        // dashboards when prod was not touched). Soft-fails: if the monitor
+        // stack is offline, the build is marked UNSTABLE rather than
+        // FAILURE so a monitoring outage does not roll back a good deploy.
+        // ----------------------------------------------------------------
+        stage('Monitor (post-release verification)') {
+            when {
+                anyOf {
+                    tag pattern: "v*", comparator: "GLOB"
+                    expression {
+                        return params.RELEASE_TAG?.trim() ? params.RELEASE_TAG.startsWith('v') : false
+                    }
+                }
+            }
+            steps {
+                script {
+                    def monitorOk = true
+
+                    // 1. Health endpoints
+                    def checks = [
+                        [name: 'Prometheus health',   url: 'http://host.docker.internal:9091/-/healthy'],
+                        [name: 'Grafana health',      url: 'http://host.docker.internal:3002/api/health'],
+                        [name: 'Alertmanager health', url: 'http://host.docker.internal:9093/-/healthy'],
+                    ]
+                    for (c in checks) {
+                        def rc = sh(returnStatus: true,
+                                    script: "curl -fsS --max-time 5 -o /dev/null '" + c.url + "'")
+                        if (rc != 0) {
+                            echo "===> [WARN] ${c.name} unreachable at ${c.url}"
+                            monitorOk = false
+                        } else {
+                            echo "===> [OK]   ${c.name}"
+                        }
+                    }
+
+                    // 2. Prometheus scrape targets all 'up'
+                    def targetsRc = sh(returnStatus: true, script: """
+                        set -eu
+                        curl -fsS --max-time 5 http://host.docker.internal:9091/api/v1/targets > /tmp/targets.json
+                        python3 -c '
+import json, sys
+d = json.load(open("/tmp/targets.json"))
+bad = [t for t in d["data"]["activeTargets"] if t["health"] != "up"]
+if bad:
+    for t in bad:
+        print("DOWN:", t["labels"].get("job","?"), "->", t.get("scrapeUrl","?"))
+    sys.exit(2)
+print("all targets up")
+'
+                    """)
+                    if (targetsRc != 0) {
+                        echo "===> [WARN] one or more Prometheus targets are down"
+                        monitorOk = false
+                    } else {
+                        echo "===> [OK]   all Prometheus targets up"
+                    }
+
+                    // 3. Annotate Grafana with deploy event
+                    withCredentials([string(credentialsId: 'grafana-deploy-token', variable: 'GRAFANA_TOKEN')]) {
+                        def buildNum = env.BUILD_NUMBER
+                        def releaseTag = params.RELEASE_TAG?.trim() ?: env.TAG_NAME ?: 'unknown'
+                        def payload = '{"text":"Deploy: build #' + buildNum +
+                                      ' promoted to production (tag ' + releaseTag +
+                                      ')","tags":["deploy","production","jenkins","build-' + buildNum + '"]}'
+                        def arc = sh(returnStatus: true, script:
+                            "curl -fsS --max-time 5 -X POST " +
+                            "http://host.docker.internal:3002/api/annotations " +
+                            "-H 'Authorization: Bearer ${GRAFANA_TOKEN}' " +
+                            "-H 'Content-Type: application/json' " +
+                            "-d '" + payload + "'"
+                        )
+                        if (arc != 0) {
+                            echo "===> [WARN] failed to write Grafana annotation"
+                            monitorOk = false
+                        } else {
+                            echo "===> [OK]   Grafana annotation written for build #${buildNum}"
+                        }
+                    }
+
+                    if (!monitorOk) {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "===> Monitor stage flagged issues; build marked UNSTABLE (deploy itself was successful)."
+                    } else {
+                        echo "===> Monitor stage: all checks green."
+                    }
+                }
+            }
+        }
+    }
     post {
         success {
             echo "===> Pipeline succeeded for build #${env.BUILD_NUMBER}"
