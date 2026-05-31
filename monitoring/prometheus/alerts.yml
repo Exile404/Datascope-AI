@@ -1,0 +1,89 @@
+# Prometheus alert rules for DataScope AI.
+# Severity convention: critical = page now; warning = investigate soon.
+
+groups:
+  - name: datascope-availability
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="datascope-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "Backend is down ({{ $labels.instance }})"
+          description: "The DataScope backend has not responded to scrapes for 2m. Production API is unavailable."
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scrape target down: {{ $labels.job }} ({{ $labels.instance }})"
+          description: "Prometheus has been unable to scrape {{ $labels.job }} for 5m. Observability for this target is degraded."
+
+  - name: datascope-app
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="datascope-backend",status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(http_requests_total{job="datascope-backend"}[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "Backend 5xx error rate above 5% for 5m"
+          description: "More than 5% of requests are returning 5xx. Current rate: {{ $value | humanizePercentage }}."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="datascope-backend"}[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Backend p95 latency above 2s for 10m"
+          description: "p95 latency is {{ $value | humanizeDuration }}. SLO budget is being consumed."
+
+  - name: datascope-host
+    interval: 30s
+    rules:
+      - alert: HostHighCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU above 90% for 10m"
+          description: "Sustained CPU pressure ({{ $value | humanize }}%). Investigate runaway processes or undersized infra."
+
+      - alert: HostHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory above 90% for 10m"
+          description: "Host is at {{ $value | humanize }}% memory. OOM risk for Docker workloads."
+
+      - alert: HostDiskWillFillIn4Hours
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{mountpoint="/rootfs",fstype="ext4"}[1h], 4 * 3600
+          ) < 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host root disk will fill within 4h"
+          description: "Linear projection of available space crosses zero in under 4 hours. Free space now or expect outages."

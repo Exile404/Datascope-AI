@@ -1,0 +1,81 @@
+# DataScope AI — Trivy ignore list
+#
+# CVEs accepted with justification. Each entry must include:
+#   - Severity + CVE ID
+#   - Package + affected version
+#   - Why it's accepted (rationale)
+#   - Re-review date (force revisit at most 6 months out)
+#
+# Format: bare CVE on its own line; comment block above describes the entry.
+# Reviewed: 2026-05-22
+
+# ============================================================================
+# Group A: Debian base image vulnerabilities with NO upstream fix available
+# ============================================================================
+# All findings below are in python:3.12-slim-bookworm base image and have
+# either "affected" or "will_not_fix" status in Trivy. Debian Security Team
+# has not released patches. We accept these because:
+#
+#   1. The DataScope AI backend does not expose any user-controlled input
+#      to these libraries in a way that triggers the vulnerable code paths.
+#   2. The backend container runs as a non-root user (uid 1000), limiting
+#      blast radius of any successful exploit.
+#   3. Network ingress is restricted to FastAPI on port 8000; no direct
+#      access to libsqlite3, libssh2, libldap, libgssapi, ncurses, etc.
+#   4. Apt-get upgrade is applied at image build time, so anything that
+#      DOES get a fix will be picked up automatically on next build.
+#
+# Re-review: 2026-11-22 (6 months)
+
+# CVE-2026-5773 — curl: SMB connection reuse / wrong file transfer
+# Package: curl 7.88.1-10+deb12u14 (no fix from Debian)
+# Rationale: The backend doesn't invoke curl as an SMB client. Curl is
+# present only because the Dockerfile HEALTHCHECK uses it for localhost
+# requests. SMB protocol handler is unreachable from our usage.
+CVE-2026-5773
+
+# CVE-2026-6276 — curl: cookie leak on connection reuse
+# Package: curl 7.88.1-10+deb12u14 (no fix from Debian)
+# Rationale: HEALTHCHECK requests are localhost-only and stateless;
+# no cookies involved. App-level HTTP clients use Python httpx, not curl.
+CVE-2026-6276
+
+# CVE-2026-40356 — krb5: DoS via integer underflow
+# Packages: libgssapi-krb5-2, libk5crypto3, libkrb5-3, libkrb5support0
+# Rationale: Backend doesn't use Kerberos authentication anywhere.
+# These libs are transitively pulled in by other system packages.
+CVE-2026-40356
+
+# CVE-2023-2953 — openldap: null pointer dereference
+# Package: libldap-2.5-0 (no fix from Debian)
+# Rationale: Backend doesn't connect to LDAP. Package is a transitive
+# dependency only.
+CVE-2023-2953
+
+# CVE-2025-69720 — ncurses: buffer overflow may lead to RCE
+# Packages: libncursesw6, libtinfo6, ncurses-base, ncurses-bin
+# Rationale: ncurses is only used for terminal display in interactive shells.
+# Backend runs as a non-interactive service (uvicorn) with no TTY.
+CVE-2025-69720
+
+# CVE-2025-7458 — sqlite: integer overflow
+# Package: libsqlite3-0 3.40.1-2+deb12u2 (no fix from Debian)
+# Rationale: Backend uses SQLite only for the metrics store, a fixed schema
+# storing locally-generated metrics. No external SQL strings reach SQLite.
+# Exploitation requires crafted SQL the attacker can't supply.
+CVE-2025-7458
+
+# CVE-2026-7598 — libssh2: integer overflow on large username/password
+# Package: libssh2-1 1.10.0-3+b1 (no fix from Debian)
+# Rationale: Backend never opens SSH connections. libssh2 is a transitive
+# dep, unreachable from application code.
+CVE-2026-7598
+
+# CVE-2023-45853 — zlib: integer overflow in minizip's zipOpenNewFileInZip4_6
+# Package: zlib1g 1:1.2.13.dfsg-1 (status: will_not_fix from Debian)
+# Rationale: This CVE is in the *minizip* sub-library within zlib1g, NOT in
+# zlib's core compression code. Debian explicitly will not patch because
+# minizip is considered a separate vendored utility. Python's zlib bindings
+# do not expose minizip. We use zlib only for HTTP transport compression
+# via uvicorn/httpx, which never touches minizip.
+CVE-2023-45853

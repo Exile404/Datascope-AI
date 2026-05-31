@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1.7
+# DataScope AI Backend — Full image (GPU-enabled)
+# Used by: production deployment (Release stage)
+# Image size target: ~6 GB
+#
+# Runtime requirements on host:
+#   - NVIDIA driver installed (host kernel module)
+#   - nvidia-container-toolkit installed and configured for Docker
+#   - Container started with --gpus all  (or specific GPU IDs)
+#
+# Without --gpus, the container still boots and the app works,
+# but torch falls back to CPU and inference is slower.
+
+# ---------- Stage 1: Builder ----------
+FROM python:3.12-slim-bookworm AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip setuptools wheel
+
+# Cache layer: only invalidates when requirements.txt changes
+COPY requirements.txt /tmp/requirements.txt
+
+# Install the full GPU set. Default PyPI index gives CUDA-enabled torch
+# and pulls in nvidia-* runtime libraries automatically.
+RUN pip install -r /tmp/requirements.txt
+
+# ---------- Stage 2: Runtime ----------
+FROM python:3.12-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    APP_HOME=/app \
+    # Force CUDA visibility check at startup; safe even if no GPU present
+    CUDA_VISIBLE_DEVICES=all
+
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash --uid 1000 datascope
+
+WORKDIR ${APP_HOME}
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=datascope:datascope app/ ./app/
+# Pre-create writable data directory for volume mounts
+RUN mkdir -p /data && chown datascope:datascope /data
+VOLUME ["/data"]
+
+
+USER datascope
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

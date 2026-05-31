@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.middleware.prometheus import setup_metrics
 
 from app.config import settings
 from app.api.router import api_router
@@ -51,6 +52,8 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+# Prometheus metrics: /metrics endpoint (no-op unless ENABLE_METRICS=true)
+setup_metrics(app)
 
 app.add_middleware(
     CORSMiddleware,

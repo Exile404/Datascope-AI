@@ -1,0 +1,106 @@
+# DataScope AI — Production environment
+#
+# Stack:
+#   - backend (full GPU image, port 8000)
+#   - frontend (Next.js standalone, port 3000)
+#
+# External dependency (NOT containerized):
+#   - Ollama running on the host at http://localhost:11434
+#     Start with: `ollama serve` (or systemd service)
+#     Required model: datascope-analyst
+#
+# Pre-flight check:
+#   curl -s http://localhost:11434/api/tags | grep datascope-analyst
+#
+# Run:    docker compose -f docker-compose.prod.yml up -d
+# Stop:   docker compose -f docker-compose.prod.yml down
+# Logs:   docker compose -f docker-compose.prod.yml logs -f
+#
+# Coexists with docker-compose.staging.yml (uses different ports + project name)
+
+name: datascope-prod
+
+services:
+  # ---------- Backend (FastAPI, GPU-enabled) ----------
+  backend:
+    image: datascope-backend:${BACKEND_TAG:-full-dev}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.full
+    container_name: datascope-backend-prod
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 8000
+      DEBUG: "false"
+      # Reach host Ollama via the special docker host gateway
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "datascope-analyst"
+      LLM_TIMEOUT: 180
+      # Frontend lives at host:3000; CORS must allow it
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+      METRICS_DB_PATH: "/data/metrics.db"
+      ENABLE_METRICS: "true"
+    volumes:
+      - backend-data-prod:/data
+    # host.docker.internal isn't automatically defined on Linux,
+    # so map it to the host gateway IP that docker0 provides.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # GPU passthrough: requires nvidia-container-toolkit on host.
+    # Compose v2.3+ uses `deploy.resources.reservations.devices`.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - datascope-prod-net
+    restart: always
+
+  # ---------- Frontend (Next.js) ----------
+  frontend:
+    image: datascope-frontend:${FRONTEND_TAG:-dev}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Browser-side URL: hits backend via host port 8000
+        NEXT_PUBLIC_API_URL: "http://localhost:8000"
+    container_name: datascope-frontend-prod
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: "production"
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - datascope-prod-net
+    restart: always
+
+networks:
+  datascope-prod-net:
+    name: datascope-prod-net
+    driver: bridge
+
+volumes:
+  backend-data-prod:
+    name: datascope-backend-data-prod
